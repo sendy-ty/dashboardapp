@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+from pathlib import Path
 
 # ========================== #
 # 🔹 Konfigurasi Dashboard 🔹 #
@@ -14,23 +15,77 @@ st.set_page_config(
 )
 
 # ========================== #
-# 🔹 Membaca Dataset 🔹 #
+# 🔹 Fungsi untuk menangani data 🔹 #
 # ========================== #
-# Menggunakan relative path alih-alih absolute path
-file_path = "data.csv"
-rfm_path = "customer_segmentation.csv"
+def get_data():
+    """Fungsi untuk mencoba beberapa kemungkinan lokasi file data"""
+    # Daftar kemungkinan lokasi relatif
+    possible_data_paths = [
+        "data.csv",  # Sama direktori
+        "./data.csv",  # Sama direktori (notasi eksplisit)
+        "../data.csv",  # Direktori induk
+        "data/data.csv",  # Subdirektori data
+        str(Path.home() / "data.csv"),  # Home direktori user
+    ]
+    
+    possible_rfm_paths = [
+        "customer_segmentation.csv",  # Sama direktori
+        "./customer_segmentation.csv",  # Sama direktori (notasi eksplisit)
+        "../customer_segmentation.csv",  # Direktori induk
+        "data/customer_segmentation.csv",  # Subdirektori data
+        str(Path.home() / "customer_segmentation.csv"),  # Home direktori user
+    ]
+    
+    df, df_path = None, None
+    for path in possible_data_paths:
+        if os.path.exists(path):
+            try:
+                df = pd.read_csv(path)
+                df_path = path
+                break
+            except Exception as e:
+                st.error(f"Error membaca file {path}: {str(e)}")
+    
+    df_rfm, rfm_path = None, None
+    for path in possible_rfm_paths:
+        if os.path.exists(path):
+            try:
+                df_rfm = pd.read_csv(path)
+                rfm_path = path
+                break
+            except Exception as e:
+                st.error(f"Error membaca file {path}: {str(e)}")
+    
+    # Mencoba membaca dari session state jika tersedia
+    if df is None and 'bike_data' in st.session_state:
+        df = st.session_state.bike_data
+        df_path = "session_state"
+    
+    if df_rfm is None and 'rfm_data' in st.session_state:
+        df_rfm = st.session_state.rfm_data
+        rfm_path = "session_state"
+    
+    return df, df_path, df_rfm, rfm_path
 
-df, df_rfm = None, None  # Inisialisasi variabel untuk menghindari error
+# Upload file handler
+def handle_uploaded_file(uploaded_file, file_type):
+    if uploaded_file is not None:
+        try:
+            df = pd.read_csv(uploaded_file)
+            if file_type == "bike":
+                st.session_state.bike_data = df
+            else:
+                st.session_state.rfm_data = df
+            return df
+        except Exception as e:
+            st.error(f"Error membaca file yang diupload: {str(e)}")
+            return None
+    return None
 
-if os.path.exists(file_path):
-    df = pd.read_csv(file_path)
-else:
-    st.warning("⚠️ Data utama tidak ditemukan. Dashboard tetap berjalan tanpa dataset utama.")
-
-if os.path.exists(rfm_path):
-    df_rfm = pd.read_csv(rfm_path)
-else:
-    st.warning("⚠️ Data segmentasi customer tidak ditemukan. Beberapa fitur mungkin tidak tersedia.")
+# ========================== #
+# 🔹 Ambil Data 🔹 #
+# ========================== #
+df, df_path, df_rfm, rfm_path = get_data()
 
 # ========================== #
 # 🔹 Header Dashboard 🔹 #
@@ -38,41 +93,40 @@ else:
 st.markdown("<h1 style='text-align: center;'>🚲 Bike Sharing & Customer Segmentation 📊</h1>", unsafe_allow_html=True)
 
 # ========================== #
-# 🔹 Filter Data 🔹 #
+# 🔹 Tampilkan informasi jika data tidak ditemukan 🔹 #
 # ========================== #
-if df_rfm is not None:
-    st.sidebar.header("🔎 Filter Data")
-    segment_options = df_rfm['Customer_Segment'].unique().tolist()
-    selected_segment = st.sidebar.multiselect("Pilih Segmentasi Customer", segment_options, default=segment_options)
+col1, col2 = st.columns(2)
 
-    # ========================== #
-    # 🔹 Tabel Segmentasi Customer 🔹 #
-    # ========================== #
-    st.subheader("📋 Tabel Segmentasi Customer")
-    filtered_df = df_rfm[df_rfm['Customer_Segment'].isin(selected_segment)]
-    st.dataframe(filtered_df.head(10))
+with col1:
+    if df is None:
+        st.error("⚠️ Data bike sharing tidak ditemukan.")
+        uploaded_file = st.file_uploader("Upload file CSV data bike sharing", type="csv", key="bike_data_upload")
+        if uploaded_file is not None:
+            df = handle_uploaded_file(uploaded_file, "bike")
+            if df is not None:
+                st.success("✅ Data berhasil diupload!")
+    else:
+        st.success(f"✅ Data bike sharing berhasil dimuat dari: {df_path}")
 
-    # ========================== #
-    # 🔹 Visualisasi Distribusi Customer 🔹 #
-    # ========================== #
-    st.subheader("👥 Distribusi Customer Berdasarkan Segmentasi RFM")
-    df_rfm['Customer_Segment'] = df_rfm['Customer_Segment'].astype(str)
-    customer_count = df_rfm['Customer_Segment'].value_counts().reset_index()
-    customer_count.columns = ["Segment", "Jumlah Customer"]
+with col2:
+    if df_rfm is None:
+        st.error("⚠️ Data segmentasi customer tidak ditemukan.")
+        uploaded_file = st.file_uploader("Upload file CSV segmentasi customer", type="csv", key="rfm_data_upload")
+        if uploaded_file is not None:
+            df_rfm = handle_uploaded_file(uploaded_file, "rfm")
+            if df_rfm is not None:
+                st.success("✅ Data berhasil diupload!")
+    else:
+        st.success(f"✅ Data segmentasi customer berhasil dimuat dari: {rfm_path}")
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.barplot(data=customer_count, x="Segment", y="Jumlah Customer", palette="pastel", ax=ax)
-    ax.set_xlabel("Kategori Customer")
-    ax.set_ylabel("Jumlah Customer")
-    ax.set_title("Distribusi Customer Berdasarkan Segmentasi RFM")
-    plt.xticks(rotation=30)
-    st.pyplot(fig)
+# ========================== #
+# 🔹 Analisis Data Bike Sharing 🔹 #
+# ========================== #
+st.markdown("---")
+st.subheader("📊 Analisis Data Bike Sharing")
 
-# Menambahkan visualisasi data bike sharing jika dataset tersedia
+# Jika data bike sharing tersedia, tampilkan visualisasi
 if df is not None:
-    st.markdown("---")
-    st.subheader("📈 Analisis Data Bike Sharing")
-    
     # Visualisasi 1: Total penggunaan sepeda berdasarkan waktu (jika kolom tanggal tersedia)
     if 'date' in df.columns or 'dteday' in df.columns:
         date_col = 'date' if 'date' in df.columns else 'dteday'
@@ -129,25 +183,42 @@ if df is not None:
         ax.set_title('Rata-rata Penggunaan Sepeda Berdasarkan Hari')
         plt.xticks(rotation=30)
         st.pyplot(fig)
+else:
+    st.info("Data bike sharing tidak tersedia. Silakan upload file data.")
 
 # ========================== #
-# 🔹 File Uploader untuk Upload Data 🔹 #
+# 🔹 Filter Data Segmentasi Customer 🔹 #
 # ========================== #
 st.markdown("---")
-st.subheader("📤 Upload Data")
-st.write("Jika data tidak tersedia, Anda dapat mengupload file CSV secara langsung:")
+if df_rfm is not None:
+    st.sidebar.header("🔎 Filter Data")
+    segment_options = df_rfm['Customer_Segment'].unique().tolist()
+    selected_segment = st.sidebar.multiselect("Pilih Segmentasi Customer", segment_options, default=segment_options)
 
-uploaded_file = st.file_uploader("Upload file CSV data bike sharing", type="csv", key="bike_data")
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    st.success("✅ Data berhasil diupload!")
-    st.dataframe(df.head())
+    # ========================== #
+    # 🔹 Tabel Segmentasi Customer 🔹 #
+    # ========================== #
+    st.subheader("📋 Tabel Segmentasi Customer")
+    filtered_df = df_rfm[df_rfm['Customer_Segment'].isin(selected_segment)]
+    st.dataframe(filtered_df.head(10))
 
-uploaded_rfm = st.file_uploader("Upload file CSV segmentasi customer", type="csv", key="rfm_data")
-if uploaded_rfm is not None:
-    df_rfm = pd.read_csv(uploaded_rfm)
-    st.success("✅ Data segmentasi berhasil diupload!")
-    st.dataframe(df_rfm.head())
+    # ========================== #
+    # 🔹 Visualisasi Distribusi Customer 🔹 #
+    # ========================== #
+    st.subheader("👥 Distribusi Customer Berdasarkan Segmentasi RFM")
+    df_rfm['Customer_Segment'] = df_rfm['Customer_Segment'].astype(str)
+    customer_count = df_rfm['Customer_Segment'].value_counts().reset_index()
+    customer_count.columns = ["Segment", "Jumlah Customer"]
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.barplot(data=customer_count, x="Segment", y="Jumlah Customer", palette="pastel", ax=ax)
+    ax.set_xlabel("Kategori Customer")
+    ax.set_ylabel("Jumlah Customer")
+    ax.set_title("Distribusi Customer Berdasarkan Segmentasi RFM")
+    plt.xticks(rotation=30)
+    st.pyplot(fig)
+else:
+    st.info("Data segmentasi customer tidak tersedia. Silakan upload file data.")
 
 # ========================== #
 # 🔹 Footer Dashboard 🔹 #
